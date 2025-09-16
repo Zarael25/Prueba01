@@ -43,3 +43,6 @@ finally:
     cursor.close()
     conn.close()
     ser.close()
+
+
+#HOLAS
