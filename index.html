@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Control de Mesas</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    text-align: center;
+    background: #f4f4f4;
+  }
+  h1 {
+    margin-bottom: 20px;
+  }
+  #mesas-container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .mesa {
+    background: white; /* color por defecto */
+    padding: 15px;
+    margin: 10px;
+    border-radius: 10px;
+    width: 180px;
+    box-shadow: 0 0 5px #aaa;
+    transition: background-color 0.3s ease;
+  }
+  .vacio {
+    background-color: white;
+  }
+  .espera {
+    background-color: #f9d71c; /* amarillo */
+  }
+  .listo {
+    background-color: #4caf50; /* verde */
+    color: white;
+  }
+  .ocupado {
+    background-color: #a9a9a9; /* gris */
+    color: white;
+  }
+  select {
+    padding: 5px;
+    margin: 10px 0;
+    width: 100%;
+    font-size: 14px;
+  }
+  input {
+    width: 80px;
+    padding: 5px;
+    text-align: center;
+  }
+  .aviso {
+    margin-top: 8px;
+    color: white;
+    font-weight: bold;
+  }
+</style>
+</head>
+<body>
+
+<h1>Panel de Mesas</h1>
+<button onclick="conectarArduino()">Conectar Arduino</button>
+
+<div id="mesas-container"></div>
+
+<script>
+let port;
+let estadoActual = Array(8).fill(0); // Estado inicial: 0 = Vacío
+let reader; // Para leer datos desde Arduino
+
+// Crear 8 mesas dinámicamente
+const container = document.getElementById('mesas-container');
+for (let i = 1; i <= 8; i++) {
+  const div = document.createElement('div');
+  div.className = "mesa vacio"; // asignar clase vacio por defecto
+  div.id = `mesaContenedor${i}`; // id para el div contenedor
+  div.innerHTML = `
+    <h2>Mesa ${i}</h2>
+    <select id="estadoMesa${i}" onchange="cambiarEstado(${i})">
+      <option value="0">Vacío</option>
+      <option value="1">Listo</option>
+      <option value="2">Espera</option>
+      <option value="3">Ocupado</option>
+    </select>
+    <div>
+      <label>Pedido:</label>
+      <input type="number" id="pedidoMesa${i}" value="0" min="0" onchange="enviarDatos(${i})">
+    </div>
+    <div id="avisoMesa${i}" class="aviso" style="display:none;">En camino para recoger su pedido</div>
+  `;
+  container.appendChild(div);
+}
+
+async function conectarArduino() {
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 9600 });
+    alert("Arduino conectado");
+
+    // Iniciar lectura de datos
+    leerDesdeArduino();
+
+  } catch (err) {
+    alert("Error al conectar: " + err);
+  }
+}
+
+function cambiarEstado(mesa) {
+  const select = document.getElementById(`estadoMesa${mesa}`);
+  const estado = parseInt(select.value);
+  estadoActual[mesa - 1] = estado;
+
+  // Cambiar color de fondo según estado
+  const contenedor = document.getElementById(`mesaContenedor${mesa}`);
+  contenedor.classList.remove('vacio', 'listo', 'espera', 'ocupado');
+  switch(estado) {
+    case 0: contenedor.classList.add('vacio'); break;
+    case 1: contenedor.classList.add('listo'); break;
+    case 2: contenedor.classList.add('espera'); break;
+    case 3: contenedor.classList.add('ocupado'); break;
+  }
+
+  // Si cambia a Ocupado -> quitar aviso y poner pedido en 0
+  if (estado === 3) {
+    document.getElementById(`avisoMesa${mesa}`).style.display = "none";
+    document.getElementById(`pedidoMesa${mesa}`).value = 0;
+  }
+
+  enviarDatos(mesa);
+}
+
+async function enviarDatos(mesa) {
+  if (!port) {
+    alert("Primero conecta el Arduino");
+    return;
+  }
+  const pedido = document.getElementById(`pedidoMesa${mesa}`).value;
+  const comando = `M${mesa}:${estadoActual[mesa - 1]}:${pedido}\n`; 
+  const writer = port.writable.getWriter();
+  await writer.write(new TextEncoder().encode(comando));
+  writer.releaseLock();
+}
+
+async function leerDesdeArduino() {
+  const textDecoder = new TextDecoderStream();
+  const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
+  reader = textDecoder.readable.getReader();
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    if (value) {
+      procesarDatos(value.trim());
+    }
+  }
+}
+
+function procesarDatos(data) {
+  // Detecta formato "A1:EN_CAMINO"
+  if (data.startsWith("A") && data.includes(":EN_CAMINO")) {
+    const mesa = parseInt(data.substring(1, data.indexOf(':')));
+    if (mesa >= 1 && mesa <= 8) {
+      document.getElementById(`avisoMesa${mesa}`).style.display = "block";
+    }
+  }
+}
+</script>
+
+</body>
+</html>
